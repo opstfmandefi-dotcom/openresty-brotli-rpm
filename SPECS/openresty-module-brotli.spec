@@ -34,11 +34,6 @@ test -f "$module_dir/deps/brotli/c/common/constants.c"
 configure_args="$(openresty -V 2>&1 | sed -n 's/^configure arguments: //p')"
 test -n "$configure_args"
 
-# Generate OpenResty's nginx build tree, including the bundled module paths
-# referenced by the official binary's nginx configure arguments.
-./configure --with-compat
-
-cd "build/nginx-%{nginx_version}"
 eval "set -- $configure_args"
 # The official package may record ccache as its compiler wrapper, but ccache is
 # not available in the standard Rocky Linux repositories. Keep the compiler
@@ -53,9 +48,9 @@ while [ "$arg_count" -gt 0 ]; do
     set -- "$@" "$arg"
     arg_count=$((arg_count - 1))
 done
-./configure "$@" --with-compat --add-dynamic-module="$module_dir"
 
-make modules -j%{_smp_build_ncpus}
+./configure "$@" --with-compat --add-dynamic-module="$module_dir"
+make -C "build/nginx-%{nginx_version}" modules -j%{_smp_build_ncpus}
 
 %install
 install -d "%{buildroot}/usr/local/openresty/nginx/modules"
