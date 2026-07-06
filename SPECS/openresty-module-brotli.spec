@@ -11,7 +11,7 @@ Source1:        ngx_brotli.tar.gz
 Source2:        brotli.tar.gz
 Provides:       bundled(ngx_brotli) = %{ngx_brotli_commit}
 Requires:       openresty = %{openresty_version}
-BuildRequires:  gcc, gcc-c++, make, perl
+BuildRequires:  cmake, gcc, gcc-c++, make, perl
 
 %description
 The ngx_brotli filter and static Brotli compression modules, built as dynamic
@@ -30,6 +30,17 @@ tar -xzf %{SOURCE2} -C "$module_dir/deps/brotli" --strip-components=1
 module_dir="$(find %{_builddir} -maxdepth 1 -type d -name 'ngx_brotli-*' -print -quit)"
 test -n "$module_dir"
 test -f "$module_dir/deps/brotli/c/common/constants.c"
+
+cmake \
+    -S "$module_dir/deps/brotli" \
+    -B "$module_dir/deps/brotli/out" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DBUILD_SHARED_LIBS=OFF
+cmake \
+    --build "$module_dir/deps/brotli/out" \
+    --config Release \
+    --target brotlienc \
+    --parallel %{_smp_build_ncpus}
 
 configure_args="$(openresty -V 2>&1 | sed -n 's/^configure arguments: //p')"
 test -n "$configure_args"
