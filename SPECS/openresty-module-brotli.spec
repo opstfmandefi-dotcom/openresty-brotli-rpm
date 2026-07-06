@@ -40,6 +40,19 @@ test -n "$configure_args"
 
 cd "build/nginx-%{nginx_version}"
 eval "set -- $configure_args"
+# The official package may record ccache as its compiler wrapper, but ccache is
+# not available in the standard Rocky Linux repositories. Keep the compiler
+# and all ABI-relevant flags while removing that build-time-only dependency.
+arg_count=$#
+while [ "$arg_count" -gt 0 ]; do
+    arg="$1"
+    shift
+    case "$arg" in
+        --with-cc=*) arg="--with-cc=gcc" ;;
+    esac
+    set -- "$@" "$arg"
+    arg_count=$((arg_count - 1))
+done
 ./configure "$@" --with-compat --add-dynamic-module="$module_dir"
 
 make modules -j%{_smp_build_ncpus}
