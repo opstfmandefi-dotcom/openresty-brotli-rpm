@@ -9,6 +9,7 @@ URL:            https://github.com/google/ngx_brotli
 Source0:        openresty-%{openresty_version}.tar.gz
 Source1:        ngx_brotli.tar.gz
 Source2:        brotli.tar.gz
+Provides:       bundled(ngx_brotli) = %{ngx_brotli_commit}
 Requires:       openresty = %{openresty_version}
 BuildRequires:  gcc, gcc-c++, make, perl
 

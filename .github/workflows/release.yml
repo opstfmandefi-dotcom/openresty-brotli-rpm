@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       openresty_versions:
-        description: Optional comma-separated versions (empty discovers all current versions)
+        description: Optional comma-separated versions (at most two; empty discovers the latest two)
         required: false
         default: ""
       package_release:
@@ -24,12 +24,23 @@ jobs:
     outputs:
       versions: ${{ steps.versions.outputs.versions }}
       package_release: ${{ steps.version.outputs.package_release }}
+      ngx_brotli_commit: ${{ steps.ngx_brotli.outputs.commit }}
     steps:
       - name: Configure OpenResty repository
         run: |
           curl -fsSL https://openresty.org/package/rocky/openresty2.repo \
             -o /etc/yum.repos.d/openresty.repo
-          dnf install -y dnf-plugins-core
+          dnf install -y dnf-plugins-core git
+      - id: ngx_brotli
+        name: Resolve latest ngx_brotli commit
+        run: |
+          commit="$(
+            git ls-remote https://github.com/google/ngx_brotli.git HEAD |
+              awk 'NR == 1 { print $1 }'
+          )"
+          [[ "$commit" =~ ^[0-9a-f]{40}$ ]]
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "Using ngx_brotli commit: $commit"
       - id: versions
         name: Build version matrix
         env:
@@ -39,8 +50,13 @@ jobs:
             values="$(tr ',' '\n' <<<"$REQUESTED_VERSIONS")"
           else
             values="$(dnf repoquery --repo openresty --arch x86_64 \
-              --qf '%{version}' openresty | sort -Vu)"
+              --qf '%{version}' openresty)"
           fi
+          values="$(
+            sed '/^$/d' <<<"$values" |
+              sort -Vu |
+              tail -n 2
+          )"
           versions="$(
             sed '/^$/d' <<<"$values" |
               while read -r version; do
@@ -98,7 +114,8 @@ jobs:
           chmod +x scripts/*.sh
           ./scripts/build-rpm.sh \
             "${{ matrix.version }}" \
-            "${{ needs.prepare.outputs.package_release }}"
+            "${{ needs.prepare.outputs.package_release }}" \
+            "${{ needs.prepare.outputs.ngx_brotli_commit }}"
       - name: Smoke test
         run: ./scripts/smoke-test.sh artifacts/*.rpm
       - name: Create checksum
@@ -126,6 +143,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSIONS: ${{ needs.prepare.outputs.versions }}
           PACKAGE_RELEASE: ${{ needs.prepare.outputs.package_release }}
+          NGX_BROTLI_COMMIT: ${{ needs.prepare.outputs.ngx_brotli_commit }}
         run: |
           for version in $(jq -r '.[]' <<<"$VERSIONS"); do
             tag="v${version}-${PACKAGE_RELEASE}"
@@ -136,14 +154,18 @@ jobs:
               \)
             )
             ((${#files[@]} >= 4))
+            notes="Brotli dynamic-module RPMs for OpenResty ${version}, using ngx_brotli commit ${NGX_BROTLI_COMMIT}, built natively for x86_64 and aarch64 on Rocky Linux 9."
             if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
               gh release upload "$tag" "${files[@]}" \
                 --repo "$GITHUB_REPOSITORY" --clobber
+              gh release edit "$tag" \
+                --repo "$GITHUB_REPOSITORY" \
+                --notes "$notes"
             else
               gh release create "$tag" "${files[@]}" \
                 --repo "$GITHUB_REPOSITORY" \
                 --title "OpenResty Brotli module ${tag}" \
-                --notes "Brotli dynamic-module RPMs for OpenResty ${version}, built natively for x86_64 and aarch64 on Rocky Linux 9." \
+                --notes "$notes" \
                 --target "$GITHUB_SHA"
             fi
           done
