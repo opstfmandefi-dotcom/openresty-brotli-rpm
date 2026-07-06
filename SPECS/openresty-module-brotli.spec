@@ -38,8 +38,8 @@ test -n "$configure_args"
 # package dependencies and allow this bootstrap configure to find PCRE2.
 ./configure \
     --with-cc=gcc \
-    --with-cc-opt="-I/usr/local/openresty/pcre2/include" \
-    --with-ld-opt="-L/usr/local/openresty/pcre2/lib" \
+    --with-cc-opt="-I/usr/local/openresty/zlib/include -I/usr/local/openresty/pcre2/include -I/usr/local/openresty/openssl3/include" \
+    --with-ld-opt="-L/usr/local/openresty/zlib/lib -L/usr/local/openresty/pcre2/lib -L/usr/local/openresty/openssl3/lib" \
     --with-pcre-jit \
     --with-compat
 
