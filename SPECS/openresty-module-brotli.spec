@@ -54,6 +54,10 @@ while [ "$arg_count" -gt 0 ]; do
     shift
     case "$arg" in
         --with-cc=*) arg="--with-cc=gcc" ;;
+        --add-module=*)
+            arg_count=$((arg_count - 1))
+            continue
+            ;;
     esac
     set -- "$@" "$arg"
     arg_count=$((arg_count - 1))
