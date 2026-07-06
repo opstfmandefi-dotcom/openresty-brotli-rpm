@@ -79,12 +79,15 @@ make modules -j%{_smp_build_ncpus}
 
 %install
 install -d "%{buildroot}/usr/local/openresty/nginx/modules"
+install -d "%{buildroot}%{_licensedir}/%{name}"
 install -m 0755 build/nginx-%{nginx_version}/objs/ngx_http_brotli_filter_module.so \
   "%{buildroot}/usr/local/openresty/nginx/modules/"
 install -m 0755 build/nginx-%{nginx_version}/objs/ngx_http_brotli_static_module.so \
   "%{buildroot}/usr/local/openresty/nginx/modules/"
+install -m 0644 %{_builddir}/ngx_brotli-*/LICENSE \
+  "%{buildroot}%{_licensedir}/%{name}/LICENSE"
 
 %files
-%license %{_builddir}/ngx_brotli-*/LICENSE
+%license %{_licensedir}/%{name}/LICENSE
 /usr/local/openresty/nginx/modules/ngx_http_brotli_filter_module.so
 /usr/local/openresty/nginx/modules/ngx_http_brotli_static_module.so
