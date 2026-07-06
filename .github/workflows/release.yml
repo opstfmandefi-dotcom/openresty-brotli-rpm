@@ -96,7 +96,7 @@ jobs:
       - name: Install build dependencies
         run: |
           dnf install -y \
-            rpm-build gcc gcc-c++ make git perl curl file ccache \
+            rpm-build gcc gcc-c++ make git perl curl file \
             dnf-plugins-core openresty-${{ matrix.version }}
           for package in \
             openresty-zlib-devel \
