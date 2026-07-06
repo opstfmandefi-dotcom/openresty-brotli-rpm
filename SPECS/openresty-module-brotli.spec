@@ -34,6 +34,16 @@ test -f "$module_dir/deps/brotli/c/common/constants.c"
 configure_args="$(openresty -V 2>&1 | sed -n 's/^configure arguments: //p')"
 test -n "$configure_args"
 
+# Generate OpenResty's build tree. The explicit paths match the official
+# package dependencies and allow this bootstrap configure to find PCRE2.
+./configure \
+    --with-cc=gcc \
+    --with-cc-opt="-I/usr/local/openresty/pcre2/include" \
+    --with-ld-opt="-L/usr/local/openresty/pcre2/lib" \
+    --with-pcre-jit \
+    --with-compat
+
+cd "build/nginx-%{nginx_version}"
 eval "set -- $configure_args"
 # The official package may record ccache as its compiler wrapper, but ccache is
 # not available in the standard Rocky Linux repositories. Keep the compiler
@@ -50,7 +60,7 @@ while [ "$arg_count" -gt 0 ]; do
 done
 
 ./configure "$@" --with-compat --add-dynamic-module="$module_dir"
-make -C "build/nginx-%{nginx_version}" modules -j%{_smp_build_ncpus}
+make modules -j%{_smp_build_ncpus}
 
 %install
 install -d "%{buildroot}/usr/local/openresty/nginx/modules"
