@@ -1,0 +1,149 @@
+name: Release
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      openresty_versions:
+        description: Optional comma-separated versions (empty discovers all current versions)
+        required: false
+        default: ""
+      package_release:
+        description: RPM package release
+        required: true
+        default: "1"
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    container: rockylinux:9
+    outputs:
+      versions: ${{ steps.versions.outputs.versions }}
+      package_release: ${{ steps.version.outputs.package_release }}
+    steps:
+      - name: Configure OpenResty repository
+        run: |
+          curl -fsSL https://openresty.org/package/rocky/openresty2.repo \
+            -o /etc/yum.repos.d/openresty.repo
+          dnf install -y dnf-plugins-core
+      - id: versions
+        name: Build version matrix
+        env:
+          REQUESTED_VERSIONS: ${{ inputs.openresty_versions }}
+        run: |
+          if [[ -n "$REQUESTED_VERSIONS" ]]; then
+            values="$(tr ',' '\n' <<<"$REQUESTED_VERSIONS")"
+          else
+            values="$(dnf repoquery --repo openresty --arch x86_64 \
+              --qf '%{version}' openresty | sort -Vu)"
+          fi
+          versions="$(
+            sed '/^$/d' <<<"$values" |
+              while read -r version; do
+                [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
+                printf '"%s",\n' "$version"
+              done |
+              sed '$ s/,$//' |
+              awk 'BEGIN { print "[" } { print } END { print "]" }'
+          )"
+          compact="$(tr -d '[:space:]' <<<"$versions")"
+          [[ "$compact" != "[]" ]]
+          echo "versions=$compact" >> "$GITHUB_OUTPUT"
+          echo "Building OpenResty versions: $compact"
+      - id: version
+        env:
+          INPUT_RELEASE: ${{ inputs.package_release }}
+        run: |
+          release="${INPUT_RELEASE:-1}"
+          [[ "$release" =~ ^[0-9]+$ ]]
+          echo "package_release=$release" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ${{ fromJSON(needs.prepare.outputs.versions) }}
+        arch: [x86_64, aarch64]
+    runs-on: ${{ matrix.arch == 'x86_64' && 'ubuntu-24.04' || 'ubuntu-24.04-arm' }}
+    container: rockylinux:9
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure OpenResty repository
+        run: |
+          curl -fsSL https://openresty.org/package/rocky/openresty2.repo \
+            -o /etc/yum.repos.d/openresty.repo
+      - name: Install build dependencies
+        run: |
+          dnf install -y \
+            rpm-build gcc gcc-c++ make git perl curl file ccache \
+            dnf-plugins-core openresty-${{ matrix.version }}
+          for package in \
+            openresty-zlib-devel \
+            openresty-pcre-devel \
+            openresty-pcre2-devel \
+            openresty-openssl111-devel \
+            openresty-openssl3-devel
+          do
+            if dnf repoquery --available "$package" | grep -q .; then
+              dnf install -y "$package"
+            fi
+          done
+      - name: Build RPM
+        run: |
+          chmod +x scripts/*.sh
+          ./scripts/build-rpm.sh \
+            "${{ matrix.version }}" \
+            "${{ needs.prepare.outputs.package_release }}"
+      - name: Smoke test
+        run: ./scripts/smoke-test.sh artifacts/*.rpm
+      - name: Create checksum
+        working-directory: artifacts
+        run: |
+          sha256sum *.rpm > \
+            "SHA256SUMS-${{ matrix.version }}-${{ matrix.arch }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rpm-${{ matrix.version }}-${{ matrix.arch }}
+          path: artifacts/*
+          if-no-files-found: error
+
+  release:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: rpm-*
+          path: release
+          merge-multiple: true
+      - name: Create or update public releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSIONS: ${{ needs.prepare.outputs.versions }}
+          PACKAGE_RELEASE: ${{ needs.prepare.outputs.package_release }}
+        run: |
+          for version in $(jq -r '.[]' <<<"$VERSIONS"); do
+            tag="v${version}-${PACKAGE_RELEASE}"
+            mapfile -t files < <(
+              find release -type f \( \
+                -name "openresty-module-brotli-${version}-*.rpm" -o \
+                -name "SHA256SUMS-${version}-*" \
+              \)
+            )
+            ((${#files[@]} >= 4))
+            if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              gh release upload "$tag" "${files[@]}" \
+                --repo "$GITHUB_REPOSITORY" --clobber
+            else
+              gh release create "$tag" "${files[@]}" \
+                --repo "$GITHUB_REPOSITORY" \
+                --title "OpenResty Brotli module ${tag}" \
+                --notes "Brotli dynamic-module RPMs for OpenResty ${version}, built natively for x86_64 and aarch64 on Rocky Linux 9." \
+                --target "$GITHUB_SHA"
+            fi
+          done
