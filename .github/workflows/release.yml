@@ -10,9 +10,9 @@ on:
         required: false
         default: ""
       package_release:
-        description: RPM package release
-        required: true
-        default: "1"
+        description: Optional RPM package release (empty uses the unique workflow run number)
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -73,8 +73,11 @@ jobs:
       - id: version
         env:
           INPUT_RELEASE: ${{ inputs.package_release }}
+          RUN_NUMBER: ${{ github.run_number }}
         run: |
-          release="${INPUT_RELEASE:-1}"
+          # Scheduled runs must not reuse release 1: published releases are
+          # immutable and their assets cannot be replaced with --clobber.
+          release="${INPUT_RELEASE:-$RUN_NUMBER}"
           [[ "$release" =~ ^[0-9]+$ ]]
           echo "package_release=$release" >> "$GITHUB_OUTPUT"
 
@@ -138,7 +141,7 @@ jobs:
           pattern: rpm-*
           path: release
           merge-multiple: true
-      - name: Create or update public releases
+      - name: Create public releases
         env:
           GH_TOKEN: ${{ github.token }}
           VERSIONS: ${{ needs.prepare.outputs.versions }}
@@ -156,16 +159,12 @@ jobs:
             ((${#files[@]} >= 4))
             notes="Brotli dynamic-module RPMs for OpenResty ${version}, using ngx_brotli commit ${NGX_BROTLI_COMMIT}, built natively for x86_64 and aarch64 on Rocky Linux 9."
             if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-              gh release upload "$tag" "${files[@]}" \
-                --repo "$GITHUB_REPOSITORY" --clobber
-              gh release edit "$tag" \
-                --repo "$GITHUB_REPOSITORY" \
-                --notes "$notes"
-            else
-              gh release create "$tag" "${files[@]}" \
-                --repo "$GITHUB_REPOSITORY" \
-                --title "OpenResty Brotli module ${tag}" \
-                --notes "$notes" \
-                --target "$GITHUB_SHA"
+              echo "Release ${tag} already exists; leaving immutable release unchanged"
+              continue
             fi
+            gh release create "$tag" "${files[@]}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "OpenResty Brotli module ${tag}" \
+              --notes "$notes" \
+              --target "$GITHUB_SHA"
           done
